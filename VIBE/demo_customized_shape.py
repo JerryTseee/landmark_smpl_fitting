@@ -51,10 +51,12 @@ MIN_NUM_FRAMES = 25
 
 
 def main(args):
-    
-    # Disable display, because remote server no display
-    args.display = False  # Override any display flag
 
+    args.display = False  # Disable display, because remote server no display
+    custom_betas_path = "./customized_shape/weilinai_zyy_betas.npy"
+    custom_betas = np.load(custom_betas_path) # shape (1, 10)
+    custom_betas = custom_betas.squeeze() # shape (10,)
+    print(f'Custom betas loaded from {custom_betas_path}, betas shape: {custom_betas.shape}')
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -170,7 +172,11 @@ def main(args):
                 pred_cam.append(output['theta'][:, :, :3].reshape(batch_size * seqlen, -1))
                 pred_verts.append(output['verts'].reshape(batch_size * seqlen, -1, 3))
                 pred_pose.append(output['theta'][:,:,3:75].reshape(batch_size * seqlen, -1))
-                pred_betas.append(output['theta'][:, :,75:].reshape(batch_size * seqlen, -1))
+                
+                # load the customized betas for all the frames
+                custom_betas_batch = torch.tensor(custom_betas, dtype=torch.float32).unsqueeze(0).repeat(batch_size * seqlen, 1).to(device)
+                pred_betas.append(custom_betas_batch)
+                
                 pred_joints3d.append(output['kp_3d'].reshape(batch_size * seqlen, -1, 3))
                 smpl_joints2d.append(output['kp_2d'].reshape(batch_size * seqlen, -1, 2))
 
@@ -185,6 +191,7 @@ def main(args):
 
         # ========= [Optional] run Temporal SMPLify to refine the results ========= #
         if args.run_smplify and args.tracking_method == 'pose':
+            print(f'Running Temporal SMPLify...')
             norm_joints2d = np.concatenate(norm_joints2d, axis=0)
             norm_joints2d = convert_kps(norm_joints2d, src='staf', dst='spin')
             norm_joints2d = torch.from_numpy(norm_joints2d).float().to(device)
@@ -211,7 +218,10 @@ def main(args):
             pred_verts[update] = new_opt_vertices[update]
             pred_cam[update] = new_opt_cam[update]
             pred_pose[update] = new_opt_pose[update]
-            pred_betas[update] = new_opt_betas[update]
+
+            # dont update betas during smplify refinement
+            # pred_betas[update] = new_opt_betas[update]
+
             pred_joints3d[update] = new_opt_joints3d[update]
 
         elif args.run_smplify and args.tracking_method == 'bbox':
@@ -259,6 +269,7 @@ def main(args):
             'bboxes': bboxes,
             'frame_ids': frames,
         }
+        print(output_dict['betas']) # check the betas values
 
         vibe_results[person_id] = output_dict
 
